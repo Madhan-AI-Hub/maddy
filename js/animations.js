@@ -92,11 +92,14 @@
         var size = parseFloat(window.getComputedStyle(probe).fontSize) || 16;
         host.removeChild(probe);
         if (natural > avail) {
-          line.style.fontSize = (size * (avail / natural) * 0.98) + "px";
+          line.style.fontSize = (size * (avail / natural) * (avail < 520 ? 0.93 : 0.98)) + "px";
         }
       }
 
       window.addEventListener("resize", function () { fitTo(currentWord); });
+      window.addEventListener("orientationchange", function () {
+        window.setTimeout(function () { fitTo(currentWord); refresh(); }, 180);
+      });
 
       function scrambleTo(word, onDone) {
         fitTo(word);
