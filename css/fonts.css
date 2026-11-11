@@ -1,25 +1,10 @@
 /* ============================================================
-   fonts.css — Nofex display face + body/utility stacks
-   Source asset: "Nofex DEMO.otf" (family name: Nofex)
-   Personal-use demo font. Self-hosted locally.
+   fonts.css — Display, Body, and UI typography stacks
+   Ultra-crisp, high-legibility fonts optimized for contrast
    ============================================================ */
 
-@font-face {
-  font-family: "Nofex";
-  src: url("../assets/fonts/Nofex.otf") format("opentype");
-  font-weight: 400 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* Body type is a refined system stack so the site stays fully
-   offline-capable and renders instantly without a network font.
-   Small/utility type (labels, eyebrows, chips, metadata) uses
-   Google Sans, loaded from Google Fonts in the document head. */
 :root {
-  --font-display: "Nofex", "Arial Black", Impact, "Franklin Gothic Heavy", sans-serif;
-  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
-  --font-ui: "Google Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Syne", "Plus Jakarta Sans", "Google Sans", "Arial Black", sans-serif;
+  --font-body: "Plus Jakarta Sans", "Google Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-ui: "Google Sans", "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }

@@ -56,7 +56,7 @@
       var line = host.querySelector(".scramble-text");
       if (!line) { return null; }
 
-      var words = ["MADHAN", "DEVELOPER", "EDITOR", "CONTENT WRITER", "ENGINEER"];
+      var words = ["MADHAN", "DEVELOPER", "EDITOR", "CONTENT WRITER"];
       var GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&@$*+/";
       var index = 0;
       var frameTimer = null;
@@ -223,7 +223,7 @@
        Parallax
        ======================================================== */
     function setupParallax() {
-      var bg = doc.getElementById("bgImage");
+      var bg = null; /* Background movement disabled */
       if (bg) {
         gsap.to(bg, {
           yPercent: 10, ease: "none",
