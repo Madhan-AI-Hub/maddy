@@ -33,6 +33,8 @@
     window.ScrollTrigger.config({ ignoreMobileResize: true });
 
     var introPlayed = false;
+    var isCompact = (window.innerWidth <= 900) ||
+      (window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
 
     /* ========================================================
        Utilities
@@ -96,7 +98,15 @@
         }
       }
 
-      window.addEventListener("resize", function () { fitTo(currentWord); });
+      var lastW = window.innerWidth;
+      var heroVisible = true;
+      var started = false;
+
+      window.addEventListener("resize", function () {
+        if (window.innerWidth === lastW) { return; }
+        lastW = window.innerWidth;
+        fitTo(currentWord);
+      });
       window.addEventListener("orientationchange", function () {
         window.setTimeout(function () { fitTo(currentWord); refresh(); }, 180);
       });
@@ -124,23 +134,52 @@
           frame += 1;
           if (frame > maxFrame) {
             window.clearInterval(frameTimer);
+            frameTimer = null;
             line.textContent = word;
             if (onDone) { onDone(); }
           }
         }, 45);
       }
 
+      function pauseLoop() {
+        window.clearTimeout(loopTimer);
+        loopTimer = null;
+        if (frameTimer) {
+          window.clearInterval(frameTimer);
+          frameTimer = null;
+          line.textContent = words[index];
+        }
+      }
+
       function next() {
+        if (!heroVisible || doc.hidden) { return; }
         index = (index + 1) % words.length;
         scrambleTo(words[index], function () {
-          loopTimer = window.setTimeout(next, 1500);
+          if (heroVisible && !doc.hidden) {
+            loopTimer = window.setTimeout(next, 1500);
+          }
         });
+      }
+
+      var heroSec = doc.getElementById("hero");
+      if (heroSec && "IntersectionObserver" in window) {
+        var heroIO = new IntersectionObserver(function (entries) {
+          heroVisible = entries[0].isIntersecting;
+          if (!heroVisible) {
+            pauseLoop();
+          } else if (started && !loopTimer && !frameTimer) {
+            loopTimer = window.setTimeout(next, 900);
+          }
+        }, { threshold: 0.05 });
+        heroIO.observe(heroSec);
       }
 
       return {
         start: function () {
+          started = true;
           if (reduce) {
             window.setInterval(function () {
+              if (!heroVisible || doc.hidden) { return; }
               index = (index + 1) % words.length;
               fitTo(words[index]);
               line.textContent = words[index];
@@ -150,7 +189,9 @@
           /* Open with MADHAN scrambling into place, then cycle. */
           line.textContent = "";
           scrambleTo(words[index], function () {
-            loopTimer = window.setTimeout(next, 1500);
+            if (heroVisible && !doc.hidden) {
+              loopTimer = window.setTimeout(next, 1500);
+            }
           });
         }
       };
@@ -177,11 +218,11 @@
     function setupReveals() {
       var singles = gsap.utils.toArray("[data-reveal]").filter(isOutsideHero);
       singles.forEach(function (el) {
-        var useBlur = el.hasAttribute("data-blur");
-        var from = { autoAlpha: 0, y: 34 };
+        var useBlur = !isCompact && el.hasAttribute("data-blur");
+        var from = { autoAlpha: 0, y: isCompact ? 20 : 34 };
         var to = {
-          autoAlpha: 1, y: 0, duration: 1, ease: "power3.out",
-          scrollTrigger: { trigger: el, start: "top 86%" }
+          autoAlpha: 1, y: 0, duration: isCompact ? 0.65 : 1, ease: "power3.out",
+          scrollTrigger: { trigger: el, start: "top 88%", once: true }
         };
         if (useBlur) { from.filter = "blur(12px)"; to.filter = "blur(0px)"; }
         gsap.fromTo(el, from, to);
@@ -191,9 +232,9 @@
       groups.forEach(function (group) {
         var kids = Array.prototype.slice.call(group.children);
         if (!kids.length) { return; }
-        gsap.fromTo(kids, { autoAlpha: 0, y: 28 }, {
-          autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.08, ease: "power3.out",
-          scrollTrigger: { trigger: group, start: "top 84%" }
+        gsap.fromTo(kids, { autoAlpha: 0, y: isCompact ? 18 : 28 }, {
+          autoAlpha: 1, y: 0, duration: isCompact ? 0.55 : 0.8, stagger: isCompact ? 0.05 : 0.08, ease: "power3.out",
+          scrollTrigger: { trigger: group, start: "top 86%", once: true }
         });
       });
     }
@@ -210,14 +251,14 @@
           /* Fallback: slide the whole heading in */
           gsap.fromTo(el, { y: 40, autoAlpha: 0 }, {
             y: 0, autoAlpha: 1, duration: 1, ease: "power3.out",
-            scrollTrigger: { trigger: el, start: "top 88%" }
+            scrollTrigger: { trigger: el, start: "top 88%", once: true }
           });
           return;
         }
 
         gsap.fromTo(targets, { yPercent: 118 }, {
           yPercent: 0, duration: 1.1, ease: "power4.out", stagger: 0.12,
-          scrollTrigger: { trigger: el, start: "top 86%" }
+          scrollTrigger: { trigger: el, start: "top 86%", once: true }
         });
       });
     }
@@ -226,6 +267,7 @@
        Parallax
        ======================================================== */
     function setupParallax() {
+      if (isCompact) { return; }
       var bg = null; /* Background movement disabled */
       if (bg) {
         gsap.to(bg, {
@@ -261,13 +303,21 @@
       if (!track) { return; }
       /* duplicate children once so the loop is seamless */
       track.innerHTML += track.innerHTML;
-      gsap.to(track, { xPercent: -50, duration: 34, ease: "none", repeat: -1 });
+      var tween = gsap.to(track, { xPercent: -50, duration: 34, ease: "none", repeat: -1 });
+      if ("IntersectionObserver" in window) {
+        var mIO = new IntersectionObserver(function (entries) {
+          if (entries[0].isIntersecting) { tween.play(); }
+          else { tween.pause(); }
+        }, { rootMargin: "120px 0px" });
+        mIO.observe(track.parentNode || track);
+      }
     }
 
     /* ========================================================
        Section transitions — subtle depth on scroll
        ======================================================== */
     function setupSectionDepth() {
+      if (isCompact) { return; }
       gsap.utils.toArray("main > .section").forEach(function (section) {
         gsap.fromTo(section, { opacity: 0.55 }, {
           opacity: 1, ease: "none",

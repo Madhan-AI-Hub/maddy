@@ -115,6 +115,7 @@ strong { color: var(--green); font-weight: 600; }
 .section {
   position: relative;
   padding-block: clamp(84px, 13vh, 168px);
+  contain: layout style;
 }
 
 .section__head { margin-bottom: clamp(40px, 6vw, 72px); max-width: 760px; }
@@ -194,6 +195,9 @@ strong { color: var(--green); font-weight: 600; }
   z-index: -2;
   overflow: hidden;
   background: #000000;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  contain: layout paint;
 }
 
 .bg-image {
@@ -495,10 +499,11 @@ strong { color: var(--green); font-weight: 600; }
   gap: 6px;
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
   transform: translateY(-12px);
   transition: opacity 0.4s var(--ease), transform 0.4s var(--ease), visibility 0.4s;
 }
-.drawer.is-open { opacity: 1; visibility: visible; transform: translateY(0); }
+.drawer.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); }
 .drawer a {
   font-family: var(--font-display);
   text-transform: uppercase;
@@ -1069,6 +1074,8 @@ a.project:hover .project__arrow {
   border: 1px solid var(--line);
   background: #120709;
   cursor: pointer;
+  contain: layout style paint;
+  -webkit-tap-highlight-color: transparent;
   transition: transform 0.45s var(--ease), box-shadow 0.45s var(--ease), border-color 0.45s var(--ease);
 }
 .reel:hover {
@@ -1123,9 +1130,10 @@ a.project:hover .project__arrow {
   -webkit-backdrop-filter: blur(10px);
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
   transition: opacity 0.35s var(--ease), visibility 0.35s;
 }
-.lightbox.is-open { opacity: 1; visibility: visible; }
+.lightbox.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
 .lightbox__stage {
   position: relative;
   width: min(100%, 1040px);
@@ -1549,6 +1557,46 @@ a.project:hover .project__arrow {
   .contact__link { width: 46px; height: 46px; }
 }
 
+@media (max-width: 720px), (hover: none) and (pointer: coarse) {
+  :root {
+    --shadow: 0 12px 28px rgba(0, 0, 0, 0.62);
+    --shadow-soft: 0 8px 20px rgba(0, 0, 0, 0.48);
+  }
+  .glass,
+  .project,
+  .marquee,
+  .hero__meta,
+  .btn--ghost {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .glass,
+  .project { background: rgba(12, 5, 9, 0.90); }
+  .marquee { background: rgba(10, 4, 6, 0.88); }
+  .hero__meta { background: rgba(10, 4, 6, 0.86); }
+  .nav,
+  .nav.is-stuck {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(10, 4, 6, 0.94);
+  }
+  .lightbox {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(4, 1, 2, 0.94);
+  }
+  .drawer {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(6, 2, 4, 0.96);
+  }
+  .btn,
+  .portrait-frame img,
+  .about__visual img { will-change: auto; }
+  .hero__name { text-shadow: 0 3px 16px rgba(0, 0, 0, 0.96); }
+  .sec-title { text-shadow: 0 3px 16px rgba(0, 0, 0, 0.95); }
+}
+
 @media (hover: none) {
   .glass--hover:hover,
   a.project:hover,
@@ -1584,7 +1632,7 @@ a.project:hover .project__arrow {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  pointer-events: auto;
+  pointer-events: none;
   /* Transparent disc at the centre growing outward = the page shows through
      from the middle while the rest of the screen stays pure black. */
   background-image: radial-gradient(
@@ -1593,8 +1641,8 @@ a.project:hover .project__arrow {
     #000 calc(var(--pl-hole, 0px) + 0.5px)
   );
   animation:
-    pl-reveal 2.4s cubic-bezier(0.65, 0, 0.35, 1) 0.5s forwards,
-    pl-done 0s linear 2.9s forwards;
+    pl-reveal 1.4s cubic-bezier(0.65, 0, 0.35, 1) 0.15s forwards,
+    pl-done 0s linear 1.55s forwards;
 }
 
 @keyframes pl-reveal {
@@ -1604,7 +1652,7 @@ a.project:hover .project__arrow {
 
 /* Stops the overlay from swallowing clicks once the reveal has finished. */
 @keyframes pl-done {
-  to { visibility: hidden; }
+  to { visibility: hidden; display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
