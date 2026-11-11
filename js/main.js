@@ -125,6 +125,8 @@
     }
   }
 
+  var reelDidDrag = false;
+
   /* ========================================================
      3. Video lightbox
      ======================================================== */
@@ -159,7 +161,8 @@
     }
 
     [].slice.call(doc.querySelectorAll(".reel")).forEach(function (reel) {
-      reel.addEventListener("click", function () {
+      reel.addEventListener("click", function (e) {
+        if (reelDidDrag) { e.preventDefault(); return; }
         open(reel.getAttribute("data-video"), reel.getAttribute("data-title"));
       });
     });
@@ -190,20 +193,159 @@
   }
 
   /* ========================================================
-     5. Showreel videos — muted, loop, play when in view
+     5. Showreel videos — swipeable carousel + play in view
      ======================================================== */
   function setupReels() {
+    var marquee = doc.querySelector(".video__marquee");
+    var track = doc.getElementById("videoTrack");
     var reels = [].slice.call(doc.querySelectorAll(".reel video"));
-    if (!reels.length) { return; }
 
     reels.forEach(function (v) {
       v.muted = true;
       v.loop = true;
+      v.setAttribute("muted", "");
       v.setAttribute("playsinline", "");
     });
 
-    /* Respect reduced motion: leave them paused on the first frame. */
-    if (reduce) { return; }
+    if (marquee && track) {
+      var isTouching = false;
+      var isDragging = false;
+      var isHovering = false;
+      var pauseUntil = 0;
+      var dragStartX = 0;
+      var dragStartScroll = 0;
+      var touchStartX = 0;
+      var virtualPos = 0;
+      var lastTs = 0;
+      var initialized = false;
+
+      function halfWidth() {
+        return track.scrollWidth / 2;
+      }
+
+      function initScroll() {
+        var half = halfWidth();
+        if (half > 0 && !initialized) {
+          initialized = true;
+          marquee.scrollLeft = Math.round(half);
+          virtualPos = marquee.scrollLeft;
+        }
+      }
+
+      function wrapScroll() {
+        var half = halfWidth();
+        if (!half) { return 0; }
+        if (marquee.scrollLeft >= half) {
+          marquee.scrollLeft -= half;
+          virtualPos = marquee.scrollLeft;
+          return -half;
+        }
+        if (marquee.scrollLeft <= 1) {
+          marquee.scrollLeft += half;
+          virtualPos = marquee.scrollLeft;
+          return half;
+        }
+        return 0;
+      }
+
+      window.addEventListener("load", initScroll);
+      window.setTimeout(initScroll, 150);
+
+      marquee.addEventListener("touchstart", function (e) {
+        isTouching = true;
+        reelDidDrag = false;
+        if (marquee.scrollLeft <= 2) {
+          var half = halfWidth();
+          if (half > 0 && half <= marquee.scrollWidth - marquee.clientWidth) {
+            marquee.scrollLeft += half;
+            virtualPos = marquee.scrollLeft;
+          }
+        }
+        if (e.touches && e.touches[0]) { touchStartX = e.touches[0].clientX; }
+      }, { passive: true });
+
+      marquee.addEventListener("touchmove", function (e) {
+        if (e.touches && e.touches[0] && Math.abs(e.touches[0].clientX - touchStartX) > 8) {
+          reelDidDrag = true;
+        }
+      }, { passive: true });
+
+      marquee.addEventListener("touchend", function () {
+        isTouching = false;
+        pauseUntil = Date.now() + 1400;
+        virtualPos = marquee.scrollLeft;
+        window.setTimeout(function () { reelDidDrag = false; }, 60);
+      }, { passive: true });
+
+      marquee.addEventListener("pointerenter", function (e) {
+        if (e.pointerType === "mouse") { isHovering = true; }
+      });
+      marquee.addEventListener("pointerleave", function (e) {
+        if (e.pointerType === "mouse") { isHovering = false; }
+      });
+
+      marquee.addEventListener("mousedown", function (e) {
+        if (e.button !== 0) { return; }
+        isDragging = true;
+        reelDidDrag = false;
+        dragStartX = e.clientX;
+        dragStartScroll = marquee.scrollLeft;
+        marquee.classList.add("is-dragging");
+      });
+
+      window.addEventListener("mousemove", function (e) {
+        if (!isDragging) { return; }
+        var dx = e.clientX - dragStartX;
+        if (Math.abs(dx) > 6) { reelDidDrag = true; }
+        marquee.scrollLeft = dragStartScroll - dx;
+        var delta = wrapScroll();
+        if (delta) {
+          dragStartScroll += delta;
+          marquee.scrollLeft = dragStartScroll - dx;
+        }
+      });
+
+      window.addEventListener("mouseup", function () {
+        if (!isDragging) { return; }
+        isDragging = false;
+        pauseUntil = Date.now() + 1200;
+        marquee.classList.remove("is-dragging");
+        virtualPos = marquee.scrollLeft;
+        window.setTimeout(function () { reelDidDrag = false; }, 60);
+      });
+
+      marquee.addEventListener("scroll", function () {
+        if (isTouching || isDragging || Date.now() < pauseUntil) {
+          virtualPos = marquee.scrollLeft;
+          wrapScroll();
+        }
+      }, { passive: true });
+
+      if (!reduce) {
+        function tick(ts) {
+          if (!lastTs) { lastTs = ts; }
+          var dt = Math.min(ts - lastTs, 64);
+          lastTs = ts;
+
+          if (!initialized) { initScroll(); }
+
+          var activePause = isTouching || isDragging || isHovering || Date.now() < pauseUntil || doc.body.classList.contains("is-loading");
+          var half = halfWidth();
+          if (!activePause && half > 0) {
+            if (Math.abs(virtualPos - marquee.scrollLeft) > 2) {
+              virtualPos = marquee.scrollLeft;
+            }
+            virtualPos += dt * 0.042;
+            if (virtualPos >= half) { virtualPos -= half; }
+            marquee.scrollLeft = virtualPos;
+          }
+          window.requestAnimationFrame(tick);
+        }
+        window.requestAnimationFrame(tick);
+      }
+    }
+
+    if (!reels.length || reduce) { return; }
 
     function play(v) {
       var p = v.play();
