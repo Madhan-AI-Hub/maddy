@@ -247,13 +247,14 @@
   }
 
   /* ========================================================
-     5. Showreel videos — swipeable carousel + capped playback
+     5. Showreel videos — sub-pixel GPU slider + lookahead playback
      ======================================================== */
   function setupReels() {
     var marquee = doc.querySelector(".video__marquee");
     var track = doc.getElementById("videoTrack");
     var reelCards = [].slice.call(doc.querySelectorAll(".reel"));
     var reels = [].slice.call(doc.querySelectorAll(".reel video"));
+    var halfCount = Math.floor(reelCards.length / 2);
     var sectionInView = false;
     var metadataPrimed = false;
 
@@ -267,77 +268,104 @@
     function primeMetadata() {
       if (metadataPrimed) { return; }
       metadataPrimed = true;
-      reels.forEach(function (v) { v.preload = "metadata"; });
+      reels.forEach(function (v, idx) {
+        v.preload = (idx <= 2 || idx === halfCount - 1) ? "auto" : "metadata";
+      });
     }
 
     if (!marquee || !track) { return; }
 
+    var pos = 0;
+    var period = 0;
+    var cachedClientW = 0;
+    var cardMetrics = [];
     var isTouching = false;
+    var touchMode = "";
     var isDragging = false;
     var isHovering = false;
     var pauseUntil = 0;
+    var inertiaVel = 0;
+
     var dragStartX = 0;
-    var dragStartScroll = 0;
+    var lastDragX = 0;
+    var lastDragT = 0;
+    var dragVel = 0;
+
     var touchStartX = 0;
     var touchStartY = 0;
-    var virtualPos = 0;
+    var lastTouchX = 0;
+    var lastTouchT = 0;
+    var touchVel = 0;
+
     var lastTs = 0;
     var rafId = 0;
     var initialized = false;
     var dragResetTimer = 0;
-    var playSyncTimer = 0;
+    var syncTimer = 0;
+    var lastSyncPos = -9999;
     var lastTrackW = window.innerWidth;
-
-    var cachedHalf = 0;
-    var cachedClientW = 0;
-    var cachedMinBound = 0;
-    var cachedMaxBound = 0;
-    var cardMetrics = [];
 
     function measureMetrics() {
       cachedClientW = marquee.clientWidth;
-      cachedHalf = track.scrollWidth / 2;
-      var maxScroll = Math.max(0, track.scrollWidth - cachedClientW);
-      if (cachedHalf > 0 && maxScroll > cachedHalf + 60) {
-        cachedMinBound = Math.min(Math.round(cachedHalf * 0.25), Math.floor((maxScroll - cachedHalf) / 2));
-        cachedMaxBound = cachedMinBound + cachedHalf;
-      } else {
-        cachedMinBound = 0;
-        cachedMaxBound = cachedHalf;
+      if (halfCount > 0 && reelCards[halfCount]) {
+        period = reelCards[halfCount].offsetLeft - reelCards[0].offsetLeft;
       }
+      if (!period) { period = track.scrollWidth / 2; }
       cardMetrics = reelCards.map(function (el) {
         return { el: el, video: el.querySelector("video"), left: el.offsetLeft, width: el.offsetWidth };
       });
     }
 
-    function initScroll() {
-      measureMetrics();
-      if (cachedHalf > 0 && !initialized) {
-        initialized = true;
-        marquee.scrollLeft = Math.round(cachedHalf);
-        virtualPos = marquee.scrollLeft;
+    function handoffLoopVideos(dir) {
+      if (!halfCount) { return; }
+      for (var i = 0; i < halfCount; i++) {
+        var primary = cardMetrics[i] && cardMetrics[i].video;
+        var clone = cardMetrics[i + halfCount] && cardMetrics[i + halfCount].video;
+        if (!primary || !clone) { continue; }
+        var src = dir > 0 ? clone : primary;
+        var dst = dir > 0 ? primary : clone;
+        if (src.readyState >= 1 && dst.readyState >= 1 && !src.paused) {
+          try { dst.currentTime = src.currentTime; } catch (err) { /* noop */ }
+          var p = dst.play();
+          if (p && p.catch) { p.catch(function () {}); }
+        }
       }
     }
 
-    function wrapScroll() {
-      if (!cachedHalf) { return 0; }
-      var sl = marquee.scrollLeft;
-      if (sl >= cachedMaxBound) {
-        marquee.scrollLeft = sl - cachedHalf;
-        virtualPos = marquee.scrollLeft;
-        return -cachedHalf;
+    function wrapPos(nextPos) {
+      if (!period || period <= 0) { return 0; }
+      var wrapped = nextPos;
+      var wrappedDir = 0;
+      if (wrapped >= period) {
+        wrappedDir = 1;
+        handoffLoopVideos(1);
+        wrapped = wrapped % period;
+      } else if (wrapped < 0) {
+        wrappedDir = -1;
+        handoffLoopVideos(-1);
+        wrapped = ((wrapped % period) + period) % period;
       }
-      if (sl <= Math.max(1, cachedMinBound)) {
-        marquee.scrollLeft = sl + cachedHalf;
-        virtualPos = marquee.scrollLeft;
-        return cachedHalf;
+      if (wrappedDir !== 0) { lastSyncPos = -9999; }
+      return wrapped;
+    }
+
+    function renderTrack() {
+      track.style.transform = "translate3d(" + (-pos).toFixed(2) + "px, 0, 0)";
+      if (lastSyncPos === -9999 && sectionInView) { syncPlayback(); }
+    }
+
+    function initScroll() {
+      measureMetrics();
+      if (!initialized && period > 0) {
+        initialized = true;
+        pos = 0;
+        renderTrack();
       }
-      return 0;
     }
 
     function safePlay(v) {
       if (!v) { return; }
-      if (v.preload === "none") { v.preload = "metadata"; }
+      if (v.preload !== "auto") { v.preload = "auto"; }
       if (!v.paused) { return; }
       var p = v.play();
       if (p && p.catch) { p.catch(function () {}); }
@@ -349,35 +377,44 @@
     }
 
     function syncPlayback() {
+      lastSyncPos = pos;
       if (!reels.length || reduce || !sectionInView || doc.body.classList.contains("is-loading")) {
         reels.forEach(safePause);
         return;
       }
       if (!cardMetrics.length) { measureMetrics(); }
-      var sl = marquee.scrollLeft;
       var cw = cachedClientW || marquee.clientWidth;
-      var maxPlaying = finePointer ? 3 : 2;
+      var lookAhead = finePointer ? 220 : 180;
+      var trailKeep = 40;
+      var warmAhead = 380;
+      var maxPlaying = finePointer ? 4 : 3;
       var activeCount = 0;
 
       for (var i = 0; i < cardMetrics.length; i++) {
         var m = cardMetrics[i];
-        var overlap = Math.min(m.left + m.width, sl + cw) - Math.max(m.left, sl);
-        if (overlap > 24 && activeCount < maxPlaying) {
+        var relLeft = m.left - pos;
+        var relRight = relLeft + m.width;
+        if (relRight > -trailKeep && relLeft < cw + lookAhead && activeCount < maxPlaying) {
           safePlay(m.video);
           activeCount += 1;
         } else {
           safePause(m.video);
+          if (m.video && m.video.preload === "none" &&
+              ((relLeft >= cw + lookAhead && relLeft < cw + warmAhead) ||
+               (relRight <= -trailKeep && relRight > -(trailKeep + 280)))) {
+            m.video.preload = "metadata";
+          }
         }
       }
     }
     syncReelsPlaybackHook = syncPlayback;
 
-    function schedulePlaySync() {
-      if (playSyncTimer) { return; }
-      playSyncTimer = window.setTimeout(function () {
-        playSyncTimer = 0;
+    function scheduleSync(delay) {
+      if (syncTimer) { return; }
+      syncTimer = window.setTimeout(function () {
+        syncTimer = 0;
         syncPlayback();
-      }, 140);
+      }, typeof delay === "number" ? delay : 100);
     }
 
     function stopRaf() {
@@ -386,6 +423,7 @@
         rafId = 0;
       }
       lastTs = 0;
+      track.style.willChange = "auto";
     }
 
     function tick(ts) {
@@ -397,32 +435,40 @@
 
       if (!initialized) { initScroll(); }
 
-      var activePause = isTouching || isDragging || isHovering || Date.now() < pauseUntil || doc.body.classList.contains("is-loading");
-      if (!activePause && cachedHalf > 0) {
-        if (Math.abs(virtualPos - marquee.scrollLeft) > 2) {
-          virtualPos = marquee.scrollLeft;
-        }
-        virtualPos += dt * 0.042;
-        if (virtualPos >= cachedMaxBound) {
-          virtualPos -= cachedHalf;
-          schedulePlaySync();
-        }
-        marquee.scrollLeft = virtualPos;
+      var moved = false;
+      if (!isTouching && !isDragging && Math.abs(inertiaVel) > 0.015 && period > 0) {
+        pos = wrapPos(pos + inertiaVel * dt);
+        inertiaVel *= Math.pow(0.92, dt / 16);
+        if (Math.abs(inertiaVel) <= 0.015) { inertiaVel = 0; }
+        moved = true;
+      } else if (!isTouching && !isDragging && !isHovering && Date.now() >= pauseUntil && !doc.body.classList.contains("is-loading") && period > 0) {
+        pos = wrapPos(pos + dt * 0.048);
+        moved = true;
       }
-      if (!activePause && !playSyncTimer) { schedulePlaySync(); }
+
+      if (moved) {
+        renderTrack();
+        if (Math.abs(pos - lastSyncPos) >= 48) { scheduleSync(60); }
+      }
+
       rafId = window.requestAnimationFrame(tick);
     }
 
     function startRaf() {
       if (reduce || rafId || !sectionInView || doc.hidden) { return; }
+      track.style.willChange = "transform";
       rafId = window.requestAnimationFrame(tick);
     }
+
+    marquee._getPos = function () { return Math.round(pos); };
 
     window.addEventListener("load", function () { initScroll(); syncPlayback(); });
     window.addEventListener("resize", function () {
       if (window.innerWidth === lastTrackW) { return; }
       lastTrackW = window.innerWidth;
       measureMetrics();
+      pos = wrapPos(pos);
+      renderTrack();
       syncPlayback();
     });
     window.setTimeout(initScroll, 150);
@@ -430,47 +476,82 @@
     marquee.addEventListener("touchstart", function (e) {
       window.clearTimeout(dragResetTimer);
       isTouching = true;
+      touchMode = "";
       reelDidDrag = false;
+      inertiaVel = 0;
+      touchVel = 0;
       if (e.touches && e.touches[0]) {
         touchStartX = e.touches[0].clientX;
         touchStartY = e.touches[0].clientY;
+        lastTouchX = touchStartX;
+        lastTouchT = performance.now();
       }
     }, { passive: true });
 
     marquee.addEventListener("touchmove", function (e) {
       if (!e.touches || !e.touches[0]) { return; }
-      var dx = e.touches[0].clientX - touchStartX;
-      var dy = e.touches[0].clientY - touchStartY;
-      if (Math.abs(dx) > 10 || Math.abs(dy) > 12) {
+      var cx = e.touches[0].clientX;
+      var cy = e.touches[0].clientY;
+      if (!touchMode) {
+        var adx = Math.abs(cx - touchStartX);
+        var ady = Math.abs(cy - touchStartY);
+        if (adx < 8 && ady < 8) { return; }
+        if (ady > adx) {
+          touchMode = "y";
+          isTouching = false;
+          reelDidDrag = true;
+          return;
+        }
+        touchMode = "x";
         reelDidDrag = true;
+        marquee.classList.add("is-dragging");
       }
-      /* Fallback edge shift only when user actively swipes right at the left edge */
-      if (cachedMinBound === 0 && dx > 10 && Math.abs(dx) > Math.abs(dy) && marquee.scrollLeft <= 2 && cachedHalf > 0) {
-        marquee.scrollLeft += cachedHalf;
-        virtualPos = marquee.scrollLeft;
+      if (touchMode !== "x") { return; }
+      if (e.cancelable) { e.preventDefault(); }
+
+      var now = performance.now();
+      var dtMs = Math.max(now - lastTouchT, 8);
+      var stepDx = cx - lastTouchX;
+      lastTouchX = cx;
+      lastTouchT = now;
+
+      if (!period) { measureMetrics(); }
+      pos = wrapPos(pos - stepDx);
+      renderTrack();
+      if (Math.abs(pos - lastSyncPos) >= 64) { scheduleSync(80); }
+
+      var instVel = Math.max(-2.6, Math.min(2.6, -stepDx / dtMs));
+      touchVel = touchVel * 0.45 + instVel * 0.55;
+    }, { passive: false });
+
+    function finishTouch() {
+      isTouching = false;
+      marquee.classList.remove("is-dragging");
+      if (touchMode === "x") {
+        if (performance.now() - lastTouchT < 90 && Math.abs(touchVel) > 0.06) {
+          inertiaVel = touchVel;
+        }
+        pauseUntil = Date.now() + 1100;
+        scheduleSync(80);
       }
-    }, { passive: true });
+      touchMode = "";
+      dragResetTimer = window.setTimeout(function () { reelDidDrag = false; }, 110);
+    }
 
-    marquee.addEventListener("touchend", function () {
-      isTouching = false;
-      pauseUntil = Date.now() + 1400;
-      virtualPos = marquee.scrollLeft;
-      schedulePlaySync();
-      dragResetTimer = window.setTimeout(function () { reelDidDrag = false; }, 120);
-    }, { passive: true });
+    marquee.addEventListener("touchend", finishTouch, { passive: true });
+    marquee.addEventListener("touchcancel", finishTouch, { passive: true });
 
-    marquee.addEventListener("touchcancel", function () {
-      isTouching = false;
-      pauseUntil = Date.now() + 1400;
-      virtualPos = marquee.scrollLeft;
-      schedulePlaySync();
-      dragResetTimer = window.setTimeout(function () { reelDidDrag = false; }, 120);
-    }, { passive: true });
-
-    marquee.addEventListener("wheel", function () {
-      pauseUntil = Date.now() + 1200;
-      virtualPos = marquee.scrollLeft;
-    }, { passive: true });
+    marquee.addEventListener("wheel", function (e) {
+      var horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+      if (!horiz) { return; }
+      if (e.cancelable) { e.preventDefault(); }
+      if (!period) { measureMetrics(); }
+      inertiaVel = 0;
+      pos = wrapPos(pos + horiz);
+      renderTrack();
+      pauseUntil = Date.now() + 900;
+      scheduleSync(80);
+    }, { passive: false });
 
     marquee.addEventListener("pointerenter", function (e) {
       if (e.pointerType === "mouse") { isHovering = true; }
@@ -484,8 +565,11 @@
       window.clearTimeout(dragResetTimer);
       isDragging = true;
       reelDidDrag = false;
+      inertiaVel = 0;
+      dragVel = 0;
       dragStartX = e.clientX;
-      dragStartScroll = marquee.scrollLeft;
+      lastDragX = e.clientX;
+      lastDragT = performance.now();
     });
 
     window.addEventListener("mousemove", function (e) {
@@ -496,31 +580,32 @@
         marquee.classList.add("is-dragging");
       }
       if (!reelDidDrag) { return; }
-      marquee.scrollLeft = dragStartScroll - dx;
-      var delta = wrapScroll();
-      if (delta) {
-        dragStartScroll += delta;
-        marquee.scrollLeft = dragStartScroll - dx;
-      }
+      var now = performance.now();
+      var dtMs = Math.max(now - lastDragT, 8);
+      var stepDx = e.clientX - lastDragX;
+      lastDragX = e.clientX;
+      lastDragT = now;
+
+      if (!period) { measureMetrics(); }
+      pos = wrapPos(pos - stepDx);
+      renderTrack();
+      if (Math.abs(pos - lastSyncPos) >= 64) { scheduleSync(80); }
+
+      var instVel = Math.max(-2.6, Math.min(2.6, -stepDx / dtMs));
+      dragVel = dragVel * 0.45 + instVel * 0.55;
     });
 
     window.addEventListener("mouseup", function () {
       if (!isDragging) { return; }
       isDragging = false;
-      pauseUntil = Date.now() + 1200;
       marquee.classList.remove("is-dragging");
-      virtualPos = marquee.scrollLeft;
-      schedulePlaySync();
+      if (reelDidDrag && performance.now() - lastDragT < 90 && Math.abs(dragVel) > 0.06) {
+        inertiaVel = dragVel;
+      }
+      pauseUntil = Date.now() + 1000;
+      scheduleSync(80);
       dragResetTimer = window.setTimeout(function () { reelDidDrag = false; }, 100);
     });
-
-    marquee.addEventListener("scroll", function () {
-      if (isTouching || isDragging || Date.now() < pauseUntil) {
-        virtualPos = marquee.scrollLeft;
-        wrapScroll();
-        schedulePlaySync();
-      }
-    }, { passive: true });
 
     doc.addEventListener("visibilitychange", function () {
       if (doc.hidden) {
